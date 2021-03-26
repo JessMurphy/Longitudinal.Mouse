@@ -8,11 +8,12 @@ library(tidyr) #gather
 library(huxtable) #theme_plain, hux
 library(jtools) #export_summs
 library(pbkrtest) #PBmodcomp
+library(dplyr) #na_if
 
 
 ########## READ DATA ##########
 
-setwd("C:/Repositories/Longitudinal.Mouse/")
+#setwd("C:/Repositories/Longitudinal.Mouse/")
 data = read.csv("undernourished_study_science.csv", as.is=T)
 
 # helper script with functions for plotting trend lines
@@ -58,8 +59,11 @@ data_long$Mouse = as.factor(data_long$Mouse)
 # select only necessary variables
 data_long = data_long %>% select(Donor, Donor.Status, Time=time, Perc.Weight=perc_weight, Donor.Age, Mouse)
 
-# remove % weight na values (necessary for PBmodcomp)
-data_long2 = data_long[complete.cases(data_long$Perc.Weight),]
+# remove % weight na values (necessary for PBmodcomp) &
+# reorder Donor & Mouse variables by decreasing Perc.Weight
+data_long2 = data_long %>% drop_na(Perc.Weight) %>%
+  mutate(across(Donor, ~reorder(factor(.), Perc.Weight, FUN=max))) %>%
+  mutate(across(Mouse, ~factor(., levels=unique(Mouse[order(Donor)]))))
 
 # remove mice missing more than one time point
 #data_long3 = data_long2 %>% filter(Donor != "185A.2", Mouse != "4092C.9", Mouse != "3114C.11")
@@ -71,30 +75,35 @@ data_long2 = data_long[complete.cases(data_long$Perc.Weight),]
 ########## EXPLORE DATA ##########
 
 # histogram of response variable (% weight)
-ggplot(data=data_long2) + 
-  geom_histogram(aes(x=Perc.Weight)) + 
-  theme_bw(base_size=13) + labs(x="% Weight", title="Histogram of % Weight")
+ggplot(data_long2, aes(x=Perc.Weight)) +
+  geom_histogram() + theme_bw(base_size=13) + 
+  labs(x="% Weight", title="Histogram of % Weight")
 
 # scatterplot of overall data trends
-ggplot(data=data_long2) + 
-  geom_point(aes(x=Time, y=Perc.Weight, color=Donor)) + 
-  theme_bw(base_size=13) + labs(x="Days", y="% Weight", title="Overall Growth Trends")
+ggplot(data_long2, aes(x=Time, y=Perc.Weight, color=Donor)) +
+  geom_point() + theme_bw(base_size=13) + 
+  labs(x="Days", y="% Weight", title="Overall Growth Trends")
+
+# trendlines per donor
+ggplot(data_long2, aes(x=Time, y=Perc.Weight, colour=Donor.Status)) +
+  geom_point() + geom_line(aes(group=Mouse)) + facet_wrap(~Donor) + 
+  theme_bw(base_size=13)
 
 # boxplots based on mouse
-ggplot(data=data_long2) + 
-  geom_boxplot(aes(x=Mouse, y=Perc.Weight, color=Donor)) + 
-  theme_bw(base_size=13) + labs(x="Mouse", y="% Weight", title="Growth per Mouse") + 
+ggplot(data_long2, aes(x=Mouse, y=Perc.Weight, color=Donor)) +
+  geom_boxplot() + theme_bw(base_size=13) + 
+  labs(x="Mouse", y="% Weight", title="Growth per Mouse") +
   theme(axis.text.x = element_blank(), axis.ticks = element_blank())
 
 # boxplots based on donor
-ggplot(data=data_long2) + 
-  geom_boxplot(aes(x=Donor, y=Perc.Weight, color=Donor.Status)) + 
-  theme_bw(base_size=13) + labs(x="Donor", y="% Weight", title="Growth per Donor")
+ggplot(data_long2, aes(x=Donor, y=Perc.Weight, color=Donor.Status)) +
+  geom_boxplot() + theme_bw(base_size=13) + 
+  labs(x="Donor", y="% Weight", title="Growth per Donor")
 
 # boxplots based on donor status
-ggplot(data=data_long2) + 
-  geom_boxplot(aes(x=Donor.Status, y=Perc.Weight)) + 
-  theme_bw(base_size=13) + labs(x="Donor Status", y="% Weight", title="Growth per Status")
+ggplot(data_long2, aes(x=Donor.Status, y=Perc.Weight)) +
+  geom_boxplot() + theme_bw(base_size=13) + 
+  labs(x="Donor Status", y="% Weight", title="Growth per Status")
 
 
 ########### FIT MODELS ##########
@@ -139,31 +148,35 @@ null = lm(Perc.Weight ~ Donor.Status*Time, data_long2)
 ########## DIAGNOSTIC PLOTS ##########
 
 # time vs residuals (null model) to determine need for random effects
-plot1 = ggplot() + 
-  geom_line(mapping = aes(x=data_long2$time, y=residuals(null), group=data_long2$Mouse)) +
+ggplot(data_long2, aes(x=Time, y=residuals(null), group=Mouse)) +
+  geom_line() + facet_wrap(~Donor) +
   labs(x="Days", y="Residuals", title="No Random Effects") + theme_bw()
 # variance increases over time suggesting need for random effects
 
 # time vs residuals (mouse intercept model) to determine need for random slope
-plot2 = ggplot() + 
-  geom_line(mapping = aes(x=data_long2$time, y=residuals(lmod7), group=data_long2$Mouse)) +
-  scale_y_continuous(limits=c(-20,20)) +
-  labs(x="Days", y="Residuals", title="Mouse Intercept") + theme_bw()
+ggplot(data_long2, aes(x=Time, y=residuals(lmod7), group=Mouse)) +
+  geom_line() + facet_wrap(~Donor) +
+  scale_y_continuous(limits=c(-20,20)) + theme_bw() +
+  labs(x="Days", y="Residuals", title="Mouse Intercept") 
 # variance still not constant across time - add random slope
 
 # time vs residuals (mouse intercept & slope model)
-plot3 = ggplot() + 
-  geom_line(mapping = aes(x=data_long2$time, y=residuals(lmod4), group=data_long2$Mouse)) +
-  scale_y_continuous(limits=c(-20,20)) +
-  labs(x="Days", y="Residuals", title="Mouse Intercept/Slope") + theme_bw()
+ggplot(data_long2, aes(x=Time, y=residuals(lmod4), group=Mouse)) +
+  geom_line() + facet_wrap(~Donor) +
+  scale_y_continuous(limits=c(-20,20)) + theme_bw() +
+  labs(x="Days", y="Residuals", title="Mouse Intercept/Slope")
 
 # time vs residuals (donor intercept + mouse intercept & slope model)
-plot4 = ggplot() + 
-  geom_line(mapping = aes(x=data_long2$time, y=residuals(lmod2), group=data_long2$Mouse)) +
-  scale_y_continuous(limits=c(-20,20)) +
-  labs(x="Days", y="Residuals", title="Donor Intercept + Mouse Int/Slope") + theme_bw()
+ggplot(data_long2, aes(x=Time, y=residuals(lmod2), group=Mouse)) +
+  geom_line() + facet_wrap(~Donor) +
+  scale_y_continuous(limits=c(-20,20)) + theme_bw() +
+  labs(x="Days", y="Residuals", title="Donor Intercept + Mouse Int/Slope")
 
-grid.arrange(plot1, plot2, plot3, plot4, ncol=2, nrow=2)
+# time vs residuals (donor intercept & slope + mouse intercept & slope model)
+ggplot(data_long2, aes(x=Time, y=residuals(complete), group=Mouse)) +
+  geom_line() + facet_wrap(~Donor) +
+  scale_y_continuous(limits=c(-20,20)) + theme_bw() +
+  labs(x="Days", y="Residuals", title="Donor Int/Slope + Mouse Int/Slope")
 
 
 ########## TEST MODELS ##########
