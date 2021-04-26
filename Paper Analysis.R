@@ -17,7 +17,7 @@ library(dplyr) #na_if
 data = read.csv("undernourished_study_science.csv", as.is=T)
 
 # helper script with functions for plotting trend lines
-source("./EasyLME/Functions.R")
+source("C:/Repositories/EasyLME/Functions.R")
 
 
 ########## FORMAT DATA ##########
@@ -51,19 +51,19 @@ data_long$Mouse = paste(data_long$Donor, data_long$Mouse.ID.Number, sep=".")
 # treat percent weight change as numeric
 data_long$perc_weight = as.numeric(data_long$perc_weight)
 
-# treat character variables as factors
-data_long$Donor.Status = as.factor(data_long$Donor.Status)
-data_long$Donor = as.factor(data_long$Donor)
-data_long$Mouse = as.factor(data_long$Mouse)
-
 # select only necessary variables
 data_long = data_long %>% select(Donor, Donor.Status, Time=time, Perc.Weight=perc_weight, Donor.Age, Mouse)
 
-# remove % weight na values (necessary for PBmodcomp) &
-# reorder Donor & Mouse variables by decreasing Perc.Weight
-data_long2 = data_long %>% drop_na(Perc.Weight) %>%
-  mutate(across(Donor, ~reorder(factor(.), Perc.Weight, FUN=max))) %>%
-  mutate(across(Mouse, ~factor(., levels=unique(Mouse[order(Donor)]))))
+# relevel donor variable by decreasing Perc.Weight
+max_donors = data_long %>% group_by(Donor) %>% summarize(max=max(Perc.Weight, na.rm=T)) %>% arrange(desc(max))
+data_long$Donor = factor(data_long$Donor, levels=max_donors$Donor)
+
+# remove % weight na values (necessary for PBmodcomp) & arrange by donor
+data_long2 = data_long %>% drop_na(Perc.Weight) %>% arrange(Donor)
+
+# treat character variables as factors
+data_long2$Mouse = factor(data_long2$Mouse, levels=unique(data_long2$Mouse))
+data_long2$Donor.Status = as.factor(data_long2$Donor.Status)
 
 # remove mice missing more than one time point
 #data_long3 = data_long2 %>% filter(Donor != "185A.2", Mouse != "4092C.9", Mouse != "3114C.11")
@@ -86,7 +86,7 @@ ggplot(data_long2, aes(x=Time, y=Perc.Weight, color=Donor)) +
 
 # trendlines per donor
 ggplot(data_long2, aes(x=Time, y=Perc.Weight, colour=Donor.Status)) +
-  geom_point() + geom_line(aes(group=Mouse)) + facet_wrap(~Donor) + 
+  geom_line(aes(group=Mouse), lwd=1) + facet_wrap(~Donor) + 
   theme_bw(base_size=13)
 
 # boxplots based on mouse
@@ -147,36 +147,65 @@ null = lm(Perc.Weight ~ Donor.Status*Time, data_long2)
 
 ########## DIAGNOSTIC PLOTS ##########
 
-# time vs residuals (null model) to determine need for random effects
+# time vs residuals (null model) faceted by donor to determine need for random interecept (mouse)
 ggplot(data_long2, aes(x=Time, y=residuals(null), group=Mouse)) +
   geom_line() + facet_wrap(~Donor) +
   labs(x="Days", y="Residuals", title="No Random Effects") + theme_bw()
 # variance increases over time suggesting need for random effects
 
-# time vs residuals (mouse intercept model) to determine need for random slope
+# time vs residuals (mouse intercept model) faceted by donor to determine need for random slope (mouse)
 ggplot(data_long2, aes(x=Time, y=residuals(lmod7), group=Mouse)) +
   geom_line() + facet_wrap(~Donor) +
   scale_y_continuous(limits=c(-20,20)) + theme_bw() +
   labs(x="Days", y="Residuals", title="Mouse Intercept") 
 # variance still not constant across time - add random slope
 
-# time vs residuals (mouse intercept & slope model)
+# time vs residuals (mouse int/slope model) faceted by donor to determine need for random intercept (donor)
 ggplot(data_long2, aes(x=Time, y=residuals(lmod4), group=Mouse)) +
   geom_line() + facet_wrap(~Donor) +
   scale_y_continuous(limits=c(-20,20)) + theme_bw() +
   labs(x="Days", y="Residuals", title="Mouse Intercept/Slope")
 
-# time vs residuals (donor intercept + mouse intercept & slope model)
+# time vs residuals (donor int + mouse int/slope model) faceted by donor to determine need for random slope (donor)
 ggplot(data_long2, aes(x=Time, y=residuals(lmod2), group=Mouse)) +
   geom_line() + facet_wrap(~Donor) +
   scale_y_continuous(limits=c(-20,20)) + theme_bw() +
   labs(x="Days", y="Residuals", title="Donor Intercept + Mouse Int/Slope")
 
-# time vs residuals (donor intercept & slope + mouse intercept & slope model)
+# time vs residuals (donor int/slope + mouse int/slope model) faceted by donor
 ggplot(data_long2, aes(x=Time, y=residuals(complete), group=Mouse)) +
   geom_line() + facet_wrap(~Donor) +
   scale_y_continuous(limits=c(-20,20)) + theme_bw() +
   labs(x="Days", y="Residuals", title="Donor Int/Slope + Mouse Int/Slope")
+
+
+# combine the residual plots
+
+# define model names
+names = c("Donor Int/Slope + Mouse Int/Slope",
+          "Donor Intercept + Mouse Int/Slope",
+          "Mouse Intercept/Slope", "Mouse Intercept", "No Random Effects")
+
+# create list of models
+models = list(complete, lmod2, lmod4, lmod7, null)
+
+# define variables for data frame
+Time = model.frame(complete)[["Time"]]
+Model = rep(names, each=length(Time))
+RE = model.frame(complete)[["Mouse"]]
+
+# extract the residuals for each model
+Residuals = lapply(models, FUN=residuals)
+Residuals = unlist(Residuals)
+
+# create a data frame with information for the combined residual plots
+resid_data = data.frame(Time, RE, Residuals, Model)
+resid_data$Model = factor(resid_data$Model, levels=rev(names))
+                        
+# plot time vs residuals faceted by model
+ggplot(resid_data, aes(x=Time, y=Residuals)) +
+  geom_line(aes(group=RE)) + facet_wrap(~Model, ncol=2) + 
+  theme_bw()
 
 
 ########## TEST MODELS ##########
@@ -203,33 +232,15 @@ lrt7v8 = anova(lmod7, null)[2,c(6,8)]
 
 ########## RESULTS ##########
 
-# make a model comparison table for all models
-results = export_summs(complete, lmod2, lmod3, lmod4, lmod5, lmod6, lmod7, null,
-                       statistics = c("logLik"), error_pos = 'same', align = "center",
-                       bold_signif = 0.05, stars = NULL, number_format = 2,
-                       model.names = c("Donor Intercept/Slope + Mouse Intercept/Slope",
-                                       "Donor Intercept + Mouse Intercept/Slope",
-                                       "Donor Intercept/Slope + Mouse Intercept",
-                                       "Mouse Intercept/Slope", "Donor Intercept + Mouse Intercept",
-                                       "Donor Intercept", "Mouse Intercept",
-                                       "No Random Effects"),
-                       coefs = c("Group" = "Donor.StatusUndernourished",
-                                 "Time" = "time",
-                                 "Interaction" = "Donor.StatusUndernourished:time"))
-#quick_docx(theme_plain(t(results)))
+# extract the lrt p-values
+pvalues = as.numeric(c(lrt1v2[,2], lrt2v4[,2], lrt4v7[,2], lrt7v8[,2], ""))
+pvalues = formatC(pvalues, format="e", digits=2)
+pvalues[length(pvalues)] = ""
 
-# make a model comparison table for just the five models in paper
-results2 = export_summs(complete, lmod2, lmod4, lmod7, null,
-             statistics = c("logLik"), error_pos = 'same', align = "center",
-             bold_signif = 0.05, stars = NULL, number_format = 2,
-             model.names = c("Donor Intercept/Slope + Mouse Intercept/Slope",
-                             "Donor Intercept + Mouse Intercept/Slope",
-                             "Mouse Intercept/Slope", "Mouse Intercept",
-                             "No Random Effects"),
-             coefs = c("Group" = "Donor.StatusUndernourished",
-                       "Time" = "time",
-                       "Interaction" = "Donor.StatusUndernourished:time"))
-#quick_docx(theme_plain(t(results2)))
+# make a model comparison table for the five models in paper
+results = results_table(models, pvalues, names)
+rownames(results) = NULL
+#quick_docx(results)
 
 # make a test results table for the five models in paper
 tests = rbind(lrt1v2, lrt2v4, lrt4v7, lrt7v8)
@@ -245,20 +256,20 @@ tests = theme_plain(hux(tests, add_colnames = TRUE))
 # donor_lines and mouse_lines from Functions.R script
 
 # donor intercept/slope + mouse intercept/slope model (complete)
-donor_lines(complete, data_long2, "perc_weight", "time", "Donor.Status", "Donor")
-mouse_lines(complete, data_long2, "perc_weight", "time", "Donor.Status", "Donor", "Mouse")
+donor_lines(complete, data_long2, "Perc.Weight", "Time", "Donor.Status", "Donor")
+mouse_lines(complete, data_long2, "Perc.Weight", "Time", "Donor.Status", "Donor", "Mouse")
 
 # donor intercept + mouse intercept/slope model (lmod2)
-donor_lines(lmod2, data_long2, "perc_weight", "time", "Donor.Status", "Donor")
-mouse_lines(lmod2, data_long2, "perc_weight", "time", "Donor.Status", "Donor", "Mouse")
+donor_lines(lmod2, data_long2, "Perc.Weight", "Time", "Donor.Status", "Donor")
+mouse_lines(lmod2, data_long2, "Perc.Weight", "Time", "Donor.Status", "Donor", "Mouse")
 
 # mouse intercept/slope model (lmod4)
-donor_lines(lmod4, data_long2, "perc_weight", "time", "Donor.Status", "Donor")
-mouse_lines(lmod4, data_long2, "perc_weight", "time", "Donor.Status", "Donor", "Mouse")
+donor_lines(lmod4, data_long2, "Perc.Weight", "Time", "Donor.Status", "Donor")
+mouse_lines(lmod4, data_long2, "Perc.Weight", "Time", "Donor.Status", "Donor", "Mouse")
 
 # mouse intercept model (lmod7)
-donor_lines(lmod7, data_long2, "perc_weight", "time", "Donor.Status", "Donor")
-mouse_lines(lmod7, data_long2, "perc_weight", "time", "Donor.Status", "Donor", "Mouse")
+donor_lines(lmod7, data_long2, "Perc.Weight", "Time", "Donor.Status", "Donor")
+mouse_lines(lmod7, data_long2, "Perc.Weight", "Time", "Donor.Status", "Donor", "Mouse")
 
 # no random effects model (null)
-donor_lines(null, data_long2, "perc_weight", "time", "Donor.Status", "Donor")
+donor_lines(null, data_long2, "Perc.Weight", "Time", "Donor.Status", "Donor")
