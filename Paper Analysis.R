@@ -1,4 +1,4 @@
-########## LOAD LIBRARIES ##########
+#################### LOAD LIBRARIES ####################
 
 library(lme4)
 library(lmerTest)
@@ -9,9 +9,12 @@ library(huxtable) #theme_plain, hux
 library(jtools) #export_summs
 library(pbkrtest) #PBmodcomp
 library(dplyr) #na_if
+library(kableExtra) #knitr::kable
+
+#https://bbolker.github.io/mixedmodels-misc/notes/corr_braindump.html
 
 
-########## READ DATA ##########
+#################### READ DATA ####################
 
 #setwd("C:/Repositories/Longitudinal.Mouse/")
 data = read.csv("undernourished_study_science.csv", as.is=T)
@@ -20,7 +23,7 @@ data = read.csv("undernourished_study_science.csv", as.is=T)
 source("C:/Repositories/EasyLME/Functions.R")
 
 
-########## FORMAT DATA ##########
+#################### FORMAT DATA ####################
 
 # change missing or "dead" entries to NA
 data = na_if(data, "nd")
@@ -71,20 +74,12 @@ data_long2$Donor.Status = as.factor(data_long2$Donor.Status)
 # save processed data
 #save(data_long, file="./EasyLME/data/data_long.R")
 
-num_sum = data_long2 %>% group_by(Donor, Donor.Status) %>% 
-  summarize(across(Time:Perc.Weight, list(min=min, median=median, max=max, mean=mean, sd=sd)), count=n()) %>%
-  mutate(across(Time_min:Perc.Weight_sd, ~formatC(.x, format="f", digits=1)))
-
-num_sum$percent = formatC((num_sum$count/sum(num_sum$count))*100, format="f", digits=1)
-
-num_sum_long = num_sum %>% pivot_longer(cols=Time_min:Perc.Weight_sd, names_to=c("Variable", ".value"), names_sep="_")
-
-num_sum_long2 = num_sum_long %>% mutate(Mean=paste0(mean, " (", sd, ")"), Median=paste0(median, " [", min, ", ", max, "]"),
-                                        Count=paste0(count, " (", percent, "%)")) %>% select(Donor, Donor.Status, Count, Variable, Mean, Median)
-colnames(num_sum_long2)[5:6] = c("Mean (SD)", "Median [Min, Max]")
+# create a data summary table (summary_table function in Functions.R script)
+summary_table(data_long2, "Perc.Weight", "Time", "Donor.Status", "Donor", "Mouse") %>% 
+  knitr::kable(format="html") %>% kable_styling(full_width=F)
 
 
-########## EXPLORE DATA ##########
+#################### EXPLORE DATA ####################
 
 # histogram of response variable (% weight)
 ggplot(data_long2, aes(x=Perc.Weight)) +
@@ -118,7 +113,7 @@ ggplot(data_long2, aes(x=Donor.Status, y=Perc.Weight)) +
   labs(x="Donor Status", y="% Weight", title="Growth per Status")
 
 
-########### FIT MODELS ##########
+##################### FIT MODELS ####################
 
 # fit complete mixed effects model (donor slope/intercept + mouse slope/intercept)
 complete = lmerTest::lmer(Perc.Weight ~ Donor.Status*Time + (Time|Donor) + 
@@ -157,7 +152,7 @@ null = lm(Perc.Weight ~ Donor.Status*Time, data_long2)
 #save(null, file="no_RE.R")
 
 
-########## DIAGNOSTIC PLOTS ##########
+#################### DIAGNOSTIC PLOTS ####################
 
 # time vs residuals (null model) faceted by donor to determine need for random interecept (mouse)
 ggplot(data_long2, aes(x=Time, y=residuals(null), group=Mouse)) +
@@ -190,7 +185,6 @@ ggplot(data_long2, aes(x=Time, y=residuals(complete), group=Mouse)) +
   scale_y_continuous(limits=c(-20,20)) + theme_bw() +
   labs(x="Days", y="Residuals", title="Donor Int/Slope + Mouse Int/Slope")
 
-
 # combine the residual plots
 
 # define model names
@@ -220,7 +214,7 @@ ggplot(resid_data, aes(x=Time, y=Residuals)) +
   theme_bw()
 
 
-########## TEST MODELS ##########
+#################### TEST MODELS ####################
 
 # likelihood ratio tests (lrt)
 # (use refit=FALSE for restricted liklihood ratio test)
@@ -242,24 +236,21 @@ lrt7v8 = anova(lmod7, null)[2,c(6,8)]
 #pb7v8 = pbkrtest::PBmodcomp(lmod7, null, seed=1) #doesn't work with lm model
 
 
-########## RESULTS ##########
+#################### RESULTS ####################
 
 # extract the lrt p-values
 pvalues = as.numeric(c(lrt1v2[,2], lrt2v4[,2], lrt4v7[,2], lrt7v8[,2], ""))
 pvalues = formatC(pvalues, format="e", digits=2)
 pvalues[length(pvalues)] = ""
 
-# make a model comparison table for the five models in paper
+# make a model comparison table for the five models in paper (results_table function in Functions.R script)
 results = results_table(models, pvalues, names)
-#quick_docx(results[[1]])
 
 results2 = results[[1]] %>% knitr::kable(format="html", format.args=list(big.mark = ','), escape=F) %>%
   column_spec(2, bold=ifelse(results[[2]][,2]>0.05, FALSE, TRUE)) %>% 
   column_spec(3, bold=ifelse(results[[2]][,3]>0.05, FALSE, TRUE)) %>%
   column_spec(4, bold=ifelse(results[[2]][,4]>0.05, FALSE, TRUE))
-
-quick_docx(results2)
-  
+#quick_docx(results2)
 
 # make a test results table for the five models in paper
 tests = rbind(lrt1v2, lrt2v4, lrt4v7, lrt7v8)
@@ -270,9 +261,9 @@ tests = theme_plain(hux(tests, add_colnames = TRUE))
 #quick_docx(tests)
 
 
-########## FITTED LINES ##########
+#################### FITTED LINES ####################
 
-# donor_lines and mouse_lines from Functions.R script
+# donor_lines and mouse_lines functions from Functions.R script
 
 # donor intercept/slope + mouse intercept/slope model (complete)
 donor_lines(complete, data_long2, "Perc.Weight", "Time", "Donor.Status", "Donor")
