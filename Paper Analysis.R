@@ -71,6 +71,18 @@ data_long2$Donor.Status = as.factor(data_long2$Donor.Status)
 # save processed data
 #save(data_long, file="./EasyLME/data/data_long.R")
 
+num_sum = data_long2 %>% group_by(Donor, Donor.Status) %>% 
+  summarize(across(Time:Perc.Weight, list(min=min, median=median, max=max, mean=mean, sd=sd)), count=n()) %>%
+  mutate(across(Time_min:Perc.Weight_sd, ~formatC(.x, format="f", digits=1)))
+
+num_sum$percent = formatC((num_sum$count/sum(num_sum$count))*100, format="f", digits=1)
+
+num_sum_long = num_sum %>% pivot_longer(cols=Time_min:Perc.Weight_sd, names_to=c("Variable", ".value"), names_sep="_")
+
+num_sum_long2 = num_sum_long %>% mutate(Mean=paste0(mean, " (", sd, ")"), Median=paste0(median, " [", min, ", ", max, "]"),
+                                        Count=paste0(count, " (", percent, "%)")) %>% select(Donor, Donor.Status, Count, Variable, Mean, Median)
+colnames(num_sum_long2)[5:6] = c("Mean (SD)", "Median [Min, Max]")
+
 
 ########## EXPLORE DATA ##########
 
@@ -239,8 +251,15 @@ pvalues[length(pvalues)] = ""
 
 # make a model comparison table for the five models in paper
 results = results_table(models, pvalues, names)
-rownames(results) = NULL
-#quick_docx(results)
+#quick_docx(results[[1]])
+
+results2 = results[[1]] %>% knitr::kable(format="html", format.args=list(big.mark = ','), escape=F) %>%
+  column_spec(2, bold=ifelse(results[[2]][,2]>0.05, FALSE, TRUE)) %>% 
+  column_spec(3, bold=ifelse(results[[2]][,3]>0.05, FALSE, TRUE)) %>%
+  column_spec(4, bold=ifelse(results[[2]][,4]>0.05, FALSE, TRUE))
+
+quick_docx(results2)
+  
 
 # make a test results table for the five models in paper
 tests = rbind(lrt1v2, lrt2v4, lrt4v7, lrt7v8)
