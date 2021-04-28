@@ -76,7 +76,8 @@ data_long2$Donor.Status = as.factor(data_long2$Donor.Status)
 
 # create a data summary table (summary_table function in Functions.R script)
 summary_table(data_long2, "Perc.Weight", "Time", "Donor.Status", "Donor", "Mouse") %>% 
-  knitr::kable(format="html") %>% kable_styling(full_width=F)
+  knitr::kable(format="html") %>% kable_styling(full_width=F) %>%
+  add_header_above(c(" "=3, "Time"=2, "Perc.Weight"=2))
 
 
 #################### EXPLORE DATA ####################
