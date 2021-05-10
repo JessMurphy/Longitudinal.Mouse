@@ -112,36 +112,12 @@ ggplot(data_long2, aes(x=Donor.Status, y=Perc.Weight)) +
   labs(x="Donor Status", y="% Weight", title="Growth per Status")
 
 # average trendlines per donor
-
-donors = levels(data_long2$Donor)
-avg_donors = c()
-
-for (i in 1:length(donors)) {
-  
-  avg_weight = data_long2 %>% filter(Donor == donors[i]) %>% group_by(Time) %>% summarize(mean(Perc.Weight))
-  colnames(avg_weight) = c("Time", donors[i])
-  
-  if (i==1) {
-    avg_donors = avg_weight
-  } else {
-    avg_donors = full_join(avg_donors, avg_weight, by="Time")
-  }
-}
-
-avg_donors2 = gather(avg_donors, Donor, Perc.Weight, -Time)
-
-group = data_long2 %>% dplyr::select(Donor, Donor.Status) %>% distinct(Donor, .keep_all = T)
-
-times = length(unique(data_long2$Time))
-
-group2 = data.frame(Donor=rep(group$Donor, each=times), Group=rep(group$Donor.Status, each=times))
-
-avg_donor_data = avg_donors2 %>% mutate(Group=group2$Group)
-avg_donor_data$Donor = factor(avg_donor_data$Donor, levels=donors)
+avg_donors = data_long2 %>% group_by(Donor, Time) %>% 
+  summarize(Perc.Weight=mean(Perc.Weight), Donor.Status=first(Donor.Status))
 
 ggplot() +
-  geom_line(avg_donor_data, mapping=aes(x=Time, y=Perc.Weight, color=Donor, linetype=Group), lwd=0.75) +
-  theme_bw(base_size=13) + guides(color=guide_legend("Donor"), linetype=guide_legend("Donor.Status"))
+  geom_line(avg_donors, mapping=aes(x=Time, y=Perc.Weight, color=Donor, linetype=Donor.Status), lwd=0.75) +
+  theme_bw(base_size=13) 
 
 
 ##################### FIT MODELS ####################
