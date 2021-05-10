@@ -3,10 +3,8 @@
 library(lme4)
 library(lmerTest)
 library(ggplot2)
-library(gridExtra) #grid.arrange
 library(tidyr) #gather
-library(huxtable) #theme_plain, hux
-library(jtools) #export_summs
+library(huxtable) #quick_docx
 library(pbkrtest) #PBmodcomp
 library(dplyr) #na_if
 library(kableExtra) #knitr::kable
@@ -90,7 +88,7 @@ ggplot(data_long2, aes(x=Perc.Weight)) +
 # scatterplot of overall data trends
 ggplot(data_long2, aes(x=Time, y=Perc.Weight, color=Donor)) +
   geom_point() + theme_bw(base_size=13) + 
-  labs(x="Days", y="% Weight", title="Overall Growth Trends")
+  labs(x="Time", y="Perc.Weight")
 
 # trendlines per donor
 ggplot(data_long2, aes(x=Time, y=Perc.Weight, colour=Donor.Status)) +
@@ -112,6 +110,38 @@ ggplot(data_long2, aes(x=Donor, y=Perc.Weight, color=Donor.Status)) +
 ggplot(data_long2, aes(x=Donor.Status, y=Perc.Weight)) +
   geom_boxplot() + theme_bw(base_size=13) + 
   labs(x="Donor Status", y="% Weight", title="Growth per Status")
+
+# average trendlines per donor
+
+donors = levels(data_long2$Donor)
+avg_donors = c()
+
+for (i in 1:length(donors)) {
+  
+  avg_weight = data_long2 %>% filter(Donor == donors[i]) %>% group_by(Time) %>% summarize(mean(Perc.Weight))
+  colnames(avg_weight) = c("Time", donors[i])
+  
+  if (i==1) {
+    avg_donors = avg_weight
+  } else {
+    avg_donors = full_join(avg_donors, avg_weight, by="Time")
+  }
+}
+
+avg_donors2 = gather(avg_donors, Donor, Perc.Weight, -Time)
+
+group = data_long2 %>% dplyr::select(Donor, Donor.Status) %>% distinct(Donor, .keep_all = T)
+
+times = length(unique(data_long2$Time))
+
+group2 = data.frame(Donor=rep(group$Donor, each=times), Group=rep(group$Donor.Status, each=times))
+
+avg_donor_data = avg_donors2 %>% mutate(Group=group2$Group)
+avg_donor_data$Donor = factor(avg_donor_data$Donor, levels=donors)
+
+ggplot() +
+  geom_line(avg_donor_data, mapping=aes(x=Time, y=Perc.Weight, color=Donor, linetype=Group), lwd=0.75) +
+  theme_bw(base_size=13) + guides(color=guide_legend("Donor"), linetype=guide_legend("Donor.Status"))
 
 
 ##################### FIT MODELS ####################
@@ -212,7 +242,7 @@ resid_data$Model = factor(resid_data$Model, levels=rev(names))
 # plot time vs residuals faceted by model
 ggplot(resid_data, aes(x=Time, y=Residuals)) +
   geom_line(aes(group=RE)) + facet_wrap(~Model, ncol=2) + 
-  theme_bw()
+  theme_bw(base_size=13)
 
 
 #################### TEST MODELS ####################
