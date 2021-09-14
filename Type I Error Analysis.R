@@ -11,7 +11,7 @@ library(binom) #binom.confint
 setwd("C:/Repositories/Longitudinal.Mouse/")
 
 # load in data and necessary models
-data_long = read.csv("./EasyLME/data/data_long.csv")
+data_long = read.csv("C:/Repositories/EasyLME/data/data_long.csv")
 load("./models/mouse_slope_int.R")
 load("./models/mouse_intercept.R")
 load("./models/no_RE.R")
@@ -20,9 +20,9 @@ load("./models/no_RE.R")
 ########## POWER ANALYSIS ##########
 
 # define study design
-n = 20  #number of subjects per group (2 groups)
+n = 4  #number of subjects per group (2 groups)
 n_time = 12 #number of time points
-n_mice = 1 #number of mice per donor
+n_mice = 5 #number of mice per donor
 nsim0 = 10000 #number of simulations
 alpha = 0.05 #significance level
 
@@ -83,9 +83,9 @@ mu_slope0[4] = 0
 
 # define lists to store outputs from simulation
 power = list()
-coefficients = list()
-errors = list()
-stats = list()
+#coefficients = list()
+#errors = list()
+#stats = list()
 
 # set seed for reproducible results
 set.seed(0)
@@ -102,9 +102,9 @@ for(j in 1:3){
   
   # define vectors to store outputs from model loop
   pval_out_slope = pval_out_int = pval_out_noRE = c()
-  slope_effect = int_effect = noRE_effect = c()
-  slope_error = int_error = noRE_error = c()
-  slope_stat = int_stat = noRE_stat = c()
+  #slope_effect = int_effect = noRE_effect = c()
+  #slope_error = int_error = noRE_error = c()
+  #slope_stat = int_stat = noRE_stat = c()
   
   set.seed(0)
   
@@ -132,28 +132,28 @@ for(j in 1:3){
     pval_out_noRE = c(pval_out_noRE, pval_noRE)
     
     # extract the coefficients of the interaction term for each model
-    interaction_slope = summary(tmp_slope)$coef[4,1]
-    slope_effect = c(slope_effect, interaction_slope)
-    interaction_int = summary(tmp_int)$coef[4,1]
-    int_effect = c(int_effect, interaction_int)
-    interaction_noRE = summary(tmp_noRE)$coef[4,1]
-    noRE_effect = c(noRE_effect, interaction_noRE)
+    #interaction_slope = summary(tmp_slope)$coef[4,1]
+    #slope_effect = c(slope_effect, interaction_slope)
+    #interaction_int = summary(tmp_int)$coef[4,1]
+    #int_effect = c(int_effect, interaction_int)
+    #interaction_noRE = summary(tmp_noRE)$coef[4,1]
+    #noRE_effect = c(noRE_effect, interaction_noRE)
     
     # extract the standard error of the interaction term for each model
-    se_slope = summary(tmp_slope)$coef[4,2]
-    slope_error = c(slope_error, se_slope)
-    se_int = summary(tmp_int)$coef[4,2]
-    int_error = c(int_error, se_int)
-    se_noRE = summary(tmp_noRE)$coef[4,2]
-    noRE_error = c(noRE_error, se_noRE)
+    #se_slope = summary(tmp_slope)$coef[4,2]
+    #slope_error = c(slope_error, se_slope)
+    #se_int = summary(tmp_int)$coef[4,2]
+    #int_error = c(int_error, se_int)
+    #se_noRE = summary(tmp_noRE)$coef[4,2]
+    #noRE_error = c(noRE_error, se_noRE)
     
     # extract the t-statistic of the interaction term for each model
-    t_slope = summary(tmp_slope)$coef[4,4]
-    slope_stat = c(slope_stat, t_slope)
-    t_int = summary(tmp_int)$coef[4,4]
-    int_stat = c(int_stat, t_int)
-    t_noRE = summary(tmp_noRE)$coef[4,3]
-    noRE_stat = c(noRE_stat, t_noRE)
+    #t_slope = summary(tmp_slope)$coef[4,4]
+    #slope_stat = c(slope_stat, t_slope)
+    #t_int = summary(tmp_int)$coef[4,4]
+    #int_stat = c(int_stat, t_int)
+    #t_noRE = summary(tmp_noRE)$coef[4,3]
+    #noRE_stat = c(noRE_stat, t_noRE)
     
   } # end sim loop
   
@@ -167,16 +167,16 @@ for(j in 1:3){
   colnames(power[[j]]) = c("Slope & Intercept", "Intercept", "None")
   
   # combine the interaction coefficients simulated under the same dataset 
-  coefficients[[j]] = cbind(slope_effect, int_effect, noRE_effect) 
-  colnames(coefficients[[j]]) = c("Slope & Intercept", "Intercept", "None")
+  #coefficients[[j]] = cbind(slope_effect, int_effect, noRE_effect) 
+  #colnames(coefficients[[j]]) = c("Slope & Intercept", "Intercept", "None")
   
   # combine the standard errors simulated under the same dataset 
-  errors[[j]] = cbind(slope_error, int_error, noRE_error) 
-  colnames(errors[[j]]) = c("Slope & Intercept", "Intercept", "None")
+  #errors[[j]] = cbind(slope_error, int_error, noRE_error) 
+  #colnames(errors[[j]]) = c("Slope & Intercept", "Intercept", "None")
   
   # combine the t-statistics simulated under the same dataset 
-  stats[[j]] = cbind(slope_stat, int_stat, noRE_stat) 
-  colnames(stats[[j]]) = c("Slope & Intercept", "Intercept", "None")
+  #stats[[j]] = cbind(slope_stat, int_stat, noRE_stat) 
+  #colnames(stats[[j]]) = c("Slope & Intercept", "Intercept", "None")
   
   # print the model number
   print(j)
@@ -187,10 +187,8 @@ for(j in 1:3){
 # warning message: In checkConv(attr(opt, "derivs"), opt$par, ctrl = control$checkConv,  :
 #                  Model failed to converge with max|grad| = 0.00313721 (tol = 0.002, component 1)
 
-names(power) = c("Slope & Intercept", "Intercept", "None")
-names(coefficients) = c("Slope & Intercept", "Intercept", "None")
-names(errors) = c("Slope & Intercept", "Intercept", "None")
-names(stats) = c("Slope & Intercept", "Intercept", "None")
+models = c("Slope & Intercept", "Intercept", "None")
+names(power) = models
 
 # confidence interval function
 confint <- function(x){
