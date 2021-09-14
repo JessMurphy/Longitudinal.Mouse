@@ -7,9 +7,10 @@ library(tidyr) #gather
 library(huxtable) #quick_docx
 library(pbkrtest) #PBmodcomp
 library(dplyr) #na_if
+library(tibble) #remove_rownames
 library(kableExtra) #knitr::kable
-
-#https://bbolker.github.io/mixedmodels-misc/notes/corr_braindump.html
+library(broom.mixed) #tidy
+library(dotwhisker) #dwplot
 
 
 #################### READ DATA ####################
@@ -69,6 +70,9 @@ data_long2$Donor.Status = as.factor(data_long2$Donor.Status)
 # remove mice missing more than one time point
 #data_long3 = data_long2 %>% filter(Donor != "185A.2", Mouse != "4092C.9", Mouse != "3114C.11")
 
+# remove the first few time points (get rid of the dip)
+data_long_nodip = data_long2 %>% filter(Time>4)
+
 # save processed data
 #save(data_long, file="./EasyLME/data/data_long.R")
 
@@ -112,36 +116,12 @@ ggplot(data_long2, aes(x=Donor.Status, y=Perc.Weight)) +
   labs(x="Donor Status", y="% Weight", title="Growth per Status")
 
 # average trendlines per donor
-
-donors = levels(data_long2$Donor)
-avg_donors = c()
-
-for (i in 1:length(donors)) {
-  
-  avg_weight = data_long2 %>% filter(Donor == donors[i]) %>% group_by(Time) %>% summarize(mean(Perc.Weight))
-  colnames(avg_weight) = c("Time", donors[i])
-  
-  if (i==1) {
-    avg_donors = avg_weight
-  } else {
-    avg_donors = full_join(avg_donors, avg_weight, by="Time")
-  }
-}
-
-avg_donors2 = gather(avg_donors, Donor, Perc.Weight, -Time)
-
-group = data_long2 %>% dplyr::select(Donor, Donor.Status) %>% distinct(Donor, .keep_all = T)
-
-times = length(unique(data_long2$Time))
-
-group2 = data.frame(Donor=rep(group$Donor, each=times), Group=rep(group$Donor.Status, each=times))
-
-avg_donor_data = avg_donors2 %>% mutate(Group=group2$Group)
-avg_donor_data$Donor = factor(avg_donor_data$Donor, levels=donors)
+avg_donors = data_long2 %>% group_by(Donor, Time) %>% 
+  summarize(Perc.Weight=mean(Perc.Weight), Donor.Status=first(Donor.Status))
 
 ggplot() +
-  geom_line(avg_donor_data, mapping=aes(x=Time, y=Perc.Weight, color=Donor, linetype=Group), lwd=0.75) +
-  theme_bw(base_size=13) + guides(color=guide_legend("Donor"), linetype=guide_legend("Donor.Status"))
+  geom_line(avg_donors, mapping=aes(x=Time, y=Perc.Weight, color=Donor, linetype=Donor.Status), lwd=0.75) +
+  theme_bw(base_size=13) 
 
 
 ##################### FIT MODELS ####################
@@ -162,6 +142,16 @@ summary(allFit(complete))
 # nlminbwrap, nmkbw, nloptwrap.NLOPT_LN_NELDERMEAD, and nloptwrap.NLOPT_LN_BOBYQA 
 # did not produce convergence warnings
 
+# try making random effect term uncorrelated
+complete2 = lmerTest::lmer(Perc.Weight ~ Donor.Status*Time + (Time||Donor) + 
+                            (Time||Donor:Mouse), data_long2)
+
+# check the convergence warnings again
+summary(allFit(complete2))
+
+# only nloptwrap.NLOPT_LN_BOBYQA (the default) produced a warning
+# Model failed to converge with max|grad| = 0.00708574 (tol = 0.002, component 1)
+
 # fit nested mixed effects models
 lmod2 = update(complete, .~. - (Time|Donor) + (1|Donor)) #mouse slope/intercept + donor intercept
 lmod3 = update(complete, .~. - (Time|Donor:Mouse) + (1|Donor:Mouse)) #donor slope/intercept + mouse intercept
@@ -171,16 +161,39 @@ lmod6 = update(lmod5, .~. - (1|Donor:Mouse)) #donor intercept
 lmod7 = update(lmod5, .~. - (1|Donor)) #mouse intercept
 lmod8 = update(lmod3, .~. - (1|Donor:Mouse)) #donor slope/intercept
 
-# lmod3 produced the following warning: boundary (singular) fit: see ?isSingular
-# - nlminbwrap and nmkbw were the only optimizers that did not produce warnings for lmod3
+# lmod3 produced the following warning: In checkConv(attr(opt, "derivs"), opt$par, ctrl = control$checkConv,  :
+#                                       Model failed to converge with max|grad| = 0.00295291 (tol = 0.002, component 1)
+# - nmkbw and optimx.L-BFGS-B were the only optimizers that did not produce warnings for lmod3
+
+# lmod8 produced the following warning: boundary (singular) fit: see ?isSingular
+# - optimx.L-BFGS-B
 
 # fit null model (no random effects)
 null = lm(Perc.Weight ~ Donor.Status*Time, data_long2)
+
+# fit reduced models (without the interaction effect)
+complete.red = update(complete, .~. - Donor.Status:Time)
+lmod2.red = update(lmod2, .~. - Donor.Status:Time)
+lmod4.red = update(lmod4, .~. - Donor.Status:Time)
+lmod7.red = update(lmod7, .~. - Donor.Status:Time)
+null.red = update(null, .~. - Donor.Status:Time)
 
 # save models for power analysis
 #save(lmod4, file="mouse_slope_int.R")
 #save(lmod7, file="mouse_intercept.R")
 #save(null, file="no_RE.R")
+
+# refit the models with the first few time points removed
+complete.nodip = update(complete, data=data_long_nodip)
+lmod2.nodip = update(lmod2, data=data_long_nodip)
+lmod4.nodip = update(lmod4, data=data_long_nodip)
+lmod7.nodip = update(lmod7, data=data_long_nodip)
+null.nodip = update(null, data=data_long_nodip)
+
+# no convergence warnings for the complete model anymore, but the
+# following warning was produced for lmod2 & lmod4: Model failed to 
+# converge with max|grad| = 0.00521901 (tol = 0.002, component 1)
+# - nmkbw (just lmod2) and optimx.L-BFGS-B (both)
 
 
 #################### DIAGNOSTIC PLOTS ####################
@@ -244,33 +257,91 @@ ggplot(resid_data, aes(x=Time, y=Residuals)) +
   geom_line(aes(group=RE)) + facet_wrap(~Model, ncol=2) + 
   theme_bw(base_size=13)
 
+# create data frame of the model coefficient estimates and standard errors
+terms = c("(Intercept)", "Group", "Time", "Interaction")
+model.nums = c("I", "II", "III", "IV", "V")
+model.data = rbind(summary(complete)$coefficients[,1:2],
+                   summary(lmod2)$coefficients[,1:2],
+                   summary(lmod4)$coefficients[,1:2],
+                   summary(lmod7)$coefficients[,1:2],
+                   summary(null)$coefficients[,1:2])
+
+# add the names of the terms and models
+model.data = as.data.frame(model.data) %>% remove_rownames() %>%
+  mutate(term=rep(terms, times=5), model=rep(model.nums, each=4)) %>% 
+  rename(estimate=Estimate, std.error=`Std. Error`) %>% arrange(desc(model))
+model.data$model = factor(model.data$model, levels=model.nums, labels=model.nums)
+
+# function to recreate the ggplot2 color palette 
+# https://stackoverflow.com/questions/8197559/emulate-ggplot2-default-color-palette
+gg_color_hue <- function(n) {
+  hues = seq(15, 375, length = n + 1)
+  hcl(h = hues, l = 65, c = 100)[1:n]
+}
+
+# coefficient plot
+dwplot(model.data, dot_args=c(size=1.5), whisker_args=c(size=1)) %>% 
+  relabel_predictors(c("Donor.StatusUndernourished"="Group", "Time"="Time",
+                       "Donor.StatusUndernourished:Time"="Interaction")) +
+  geom_vline(xintercept = 0, colour = "grey60", linetype = 2) +
+  scale_color_manual(name="Model", values=gg_color_hue(5), breaks=model.nums) +
+  theme_bw(base_size=13) #+ labs(title="Full Data") + xlim(c(-2, 2))
+
+model.data.nodip = rbind(summary(complete.nodip)$coefficients[,1:2],
+                   summary(lmod2.nodip)$coefficients[,1:2],
+                   summary(lmod4.nodip)$coefficients[,1:2],
+                   summary(lmod7.nodip)$coefficients[,1:2],
+                   summary(null.nodip)$coefficients[,1:2])
+
+model.data.nodip = as.data.frame(model.data.nodip) %>% remove_rownames() %>%
+  mutate(term=rep(terms, times=5), model=rep(model.nums, each=4)) %>% 
+  rename(estimate=Estimate, std.error=`Std. Error`) %>% arrange(desc(model))
+model.data.nodip$model = factor(model.data.nodip$model, levels=model.nums, labels=model.nums)
+
+dwplot(model.data.nodip, dot_args=c(size=1.5), whisker_args=c(size=1)) %>% 
+  relabel_predictors(c("Donor.StatusUndernourished"="Group", "Time"="Time",
+                       "Donor.StatusUndernourished:Time"="Interaction")) +
+  geom_vline(xintercept = 0, colour = "grey60", linetype = 2) +
+  scale_color_manual(name="Model", values=gg_color_hue(5), breaks=model.nums) +
+  theme_bw(base_size=13) + labs(title="Reduced Data (no dip)") + xlim(c(-2, 2))
+
 
 #################### TEST MODELS ####################
 
-# likelihood ratio tests (lrt)
+# likelihood ratio tests (lrt) of the random effects
 # (use refit=FALSE for restricted liklihood ratio test)
 # extract chi-squared test statistic (column 6) & p-value (column 8)
-lrt1v2 = anova(complete, lmod2)[2,c(6,8)]
-lrt1v3 = anova(complete, lmod3)[2,c(6,8)]
-lrt2v4 = anova(lmod2, lmod4)[2,c(6,8)]
-lrt2v5 = anova(lmod2, lmod5)[2,c(6,8)]
-lrt3v5 = anova(lmod3, lmod5)[2,c(6,8)]
-lrt4v7 = anova(lmod4, lmod7)[2,c(6,8)]
-lrt5v6 = anova(lmod5, lmod6)[2,c(6,8)]
-lrt5v7 = anova(lmod5, lmod7)[2,c(6,8)]
-lrt7v8 = anova(lmod7, null)[2,c(6,8)]
+lrt1v2 = anova(complete, lmod2)[2,c(6,8)] #donor slope
+lrt1v3 = anova(complete, lmod3)[2,c(6,8)] #mouse slope
+lrt2v4 = anova(lmod2, lmod4)[2,c(6,8)] #donor intercept
+lrt2v5 = anova(lmod2, lmod5)[2,c(6,8)] #mouse slope
+lrt3v5 = anova(lmod3, lmod5)[2,c(6,8)] #donor slope
+lrt3v8 = anova(lmod3, lmod8)[2,c(6,8)] #mouse intercept
+lrt4v7 = anova(lmod4, lmod7)[2,c(6,8)] #mouse slope
+lrt5v6 = anova(lmod5, lmod6)[2,c(6,8)] #mouse intercept
+lrt5v7 = anova(lmod5, lmod7)[2,c(6,8)] #donor intercept
+lrt8v6 = anova(lmod8, lmod6)[2,c(6,8)] #donor slope
+lrt6vnull = anova(lmod6, null)[2,c(6,8)] #donor intercept
+lrt7vnull = anova(lmod7, null)[2,c(6,8)] #mouse intercept
 
-# parametric bootstrap tests (these take a little while to run)
+# parametric bootstrap tests of the random effects (these take a little while to run)
 #pb1v2 = pbkrtest::PBmodcomp(complete, lmod2, seed=1)
 #pb2v4 = pbkrtest::PBmodcomp(lmod2, lmod4, seed=1)
 #pb4v7 = pbkrtest::PBmodcomp(lmod4, lmod7, seed=1)
 #pb7v8 = pbkrtest::PBmodcomp(lmod7, null, seed=1) #doesn't work with lm model
 
+# likelihood ratio tests (lrt) of the interaction effect - needs to be refit with ML
+lrt.complete = anova(complete, complete.red)[2,c(6,8)]
+lrt.lmod2 = anova(lmod2, lmod2.red)[2,c(6,8)]
+lrt.lmod4 = anova(lmod4, lmod4.red)[2,c(6,8)]
+lrt.lmod7 = anova(lmod7, lmod7.red)[2,c(6,8)]
+lrt.null = anova(null, null.red)[2,c(6,8)]
+
 
 #################### RESULTS ####################
 
 # extract the lrt p-values
-pvalues = as.numeric(c(lrt1v2[,2], lrt2v4[,2], lrt4v7[,2], lrt7v8[,2], ""))
+pvalues = as.numeric(c(lrt1v2[,2], lrt2v4[,2], lrt4v7[,2], lrt7vnull[,2], ""))
 pvalues = formatC(pvalues, format="e", digits=2)
 pvalues[length(pvalues)] = ""
 
@@ -283,8 +354,12 @@ results2 = results[[1]] %>% knitr::kable(format="html", format.args=list(big.mar
   column_spec(4, bold=ifelse(results[[2]][,4]>0.05, FALSE, TRUE))
 #quick_docx(results2)
 
+# make a model comparison table for the five models after removing the dip
+models.nodip = list(complete.nodip, lmod2.nodip, lmod4.nodip, lmod7.nodip, null.nodip)
+results.nodip = results_table(models.nodip, pvalues=NA, names)
+
 # make a test results table for the five models in paper
-tests = rbind(lrt1v2, lrt2v4, lrt4v7, lrt7v8)
+tests = rbind(lrt1v2, lrt2v4, lrt4v7, lrt7vnull)
 models = c("1 vs 2", "2 vs 3", "3 vs 4", "4 vs 5")
 tests = cbind(models, tests)
 colnames(tests) = c("Models", "Test Statistic", "P-value")
