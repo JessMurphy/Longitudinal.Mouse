@@ -1,16 +1,16 @@
-########## LOAD LIBRARIES ##########
+#################### LOAD LIBRARIES ####################
 
 library(lme4)
 library(lmerTest)
 library(MASS) #mvnorm
 library(binom) #binom.confint
-library(tidyr) #pivot_longer
-library(ggplot2)
+library(tidyverse)
+library(ggpubr)
 
 
-########## READ DATA ##########
+#################### READ DATA ####################
 
-setwd("C:/Repositories/Longitudinal.Mouse/")
+#setwd("C:/Repositories/Longitudinal.Mouse/")
 
 # load in data and necessary models
 data_long = read.csv("C:/Repositories/EasyLME/data/data_long.csv")
@@ -19,7 +19,7 @@ load("./models/mouse_intercept.R")
 load("./models/no_RE.R")
 
 
-########## POWER ANALYSIS ##########
+#################### POWER ANALYSIS ####################
 
 # define study design
 n = 4  #number of subjects per group (2 groups)
@@ -126,21 +126,12 @@ for(j in 1:3){
       tmp_int = lmer(growth ~ Group*Time + (1|Group:Subject),  data = theData)
       tmp_noRE = lm(growth ~ Group*Time,  data = theData)
       
-      # fit reduced models (without interaction effect)
-      tmp_slope_red = update(tmp_slope, .~. -Group:Time)
-      tmp_int_red = update(tmp_int, .~. -Group:Time)
-      tmp_noRE_red = update(tmp_noRE, .~. -Group:Time)
-      
-      pval_slope = anova(tmp_slope, tmp_slope_red)[2,8]
-      pval_int = anova(tmp_int, tmp_int_red)[2,8]
-      pval_noRE = anova(tmp_noRE, tmp_noRE_red)[2,6]
-      
       # extract the p-values of the interaction term for each model
-      #pval_slope = summary(tmp_slope)$coef[4,5]
+      pval_slope = summary(tmp_slope)$coef[4,5]
       pval_out_slope = c(pval_out_slope, pval_slope)
-      #pval_int = summary(tmp_int)$coef[4,5]
+      pval_int = summary(tmp_int)$coef[4,5]
       pval_out_int = c(pval_out_int, pval_int)
-      #pval_noRE = summary(tmp_noRE)$coef[4,4]
+      pval_noRE = summary(tmp_noRE)$coef[4,4]
       pval_out_noRE = c(pval_out_noRE, pval_noRE)
       
     } # end sim loop
@@ -162,7 +153,7 @@ for(j in 1:3){
   
   # combine all the power calculations simulated under the same dataset 
   power[[j]] = cbind(power_out_slope, power_out_int, power_out_noRE) 
-  colnames(power[[j]]) = c("Slope & Intercept", "Intercept", "None") 
+  colnames(power[[j]]) = c("Mouse Slope/Int", "Mouse Intercept", "No Random Effects") 
   rownames(power[[j]]) = c("0%", "5%", "10%", "15%", "20%", "25%", "50%")
   
   # print the model number
@@ -172,7 +163,7 @@ for(j in 1:3){
 
 # warning (all models): boundary (singular) fit: see ?isSingular
 
-models = c("Slope & Intercept", "Intercept", "None")
+models = c("Mouse Intercept/Slope", "Mouse Intercept", "No Random Effects")
 names(power) = models
 
 # confidence interval function
@@ -190,7 +181,7 @@ apply(power[[2]], c(1,2), confint)
 apply(power[[3]], c(1,2), confint)
 
 
-########## POWER CURVES ##########
+#################### POWER CURVES ####################
 
 # add the effect sizes as a variable
 power = lapply(power, as.data.frame)
@@ -201,17 +192,17 @@ power.long = lapply(power2, pivot_longer, cols=all_of(models), names_to="Model",
 
 # combine all simulation scenarios together & add simulation scenario variable
 data.all = rbind(power.long[[1]], power.long[[2]], power.long[[3]])
-data.all$Scenario = rep(models, each=nrow(power.slope2))
+data.all$Scenario = rep(models, each=length(models)*length(effect_size))
 
 # ensure correct ordering of the factor variables
-data.all$Scenario = factor(data.all$Scenario, levels=models)
-data.all$Model = factor(data.all$Model, levels=models)
+data.all2$Scenario = factor(data.all2$Scenario, levels=models)
+data.all2$Model = factor(data.all2$Model, levels=models)
 
 # remove the percent sign from the effect sizes
 data.all$Effect.Size = as.numeric(sapply(strsplit(data.all$Effect.Size, "%", fixed=T), head, 1))
 
 # define confidence interval function
-confint.data <- function(data){
+confint.data <- function(data, nsim){
   
   # calculate confidence interval
   interval = binom.confint(data$Power*nsim, nsim, method="exact")
@@ -224,19 +215,22 @@ confint.data <- function(data){
 }
 
 # call the confidence interval function
-data.all2 = confint.data(data.all)
+data.all2 = confint.data(data.all, 1000)
 
-# plot of power faceted by simulation scenarios (no CIs or points removed)
-ggline(data=data.all2, x="Effect.Size", y="Power", color="Model", facet.by="Scenario",
-       xlab="Effect Size (%)", size=1)
+# save power results
+#write.table(data.all2, "power_results_long.txt", quote=F, sep="\t")
+
+# read in power results
+#data.all2 = read.table("power_results_long.txt", header=T, sep="\t")
 
 # remove the inflated power to plot
-plot.data = data.all2 %>% filter(!(Scenario=="Slope & Intercept" & Model!="Slope & Intercept" & Effect.Size>0))
+plot.data = data.all2 %>% dplyr::filter(!(Scenario=="Mouse Intercept/Slope" & Model!="Mouse Intercept/Slope" & Effect.Size>0))
 
 # plot of power faceted by simulation scenarios
-ggplot(plot.data, aes(x=Effect.Size, y=Power)) +
-  geom_point(aes(col=Model), size=1.5) + geom_line(aes(col=Model), size=0.75) + 
-  geom_ribbon(aes(ymin=Lower, ymax=Upper, fill=Model), alpha=0.25) +
+ggplot() +
+  geom_point(data=plot.data, aes(x=Effect.Size, y=Power, col=Model, shape=Model), size=1.7) + 
+  geom_line(data=plot.data %>% filter(Effect.Size!=0), aes(x=Effect.Size, y=Power, col=Model), size=0.5) + 
+  geom_ribbon(data=plot.data %>% filter(Effect.Size!=0), aes(x=Effect.Size, y=Power, ymin=Lower, ymax=Upper, fill=Model), alpha=0.25) +
+  geom_abline(data=plot.data, aes(intercept=0.05, slope=0), lty=2, col="darkgrey") +
   labs(x="Effect Size (%)") + facet_wrap(~Scenario) +
   theme_pubr(border=T)
-
