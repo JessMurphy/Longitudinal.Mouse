@@ -2,15 +2,13 @@
 
 library(lme4)
 library(lmerTest)
-library(ggplot2)
-library(tidyr) #gather
+library(nlme)
+library(tidyverse)
+library(ggpubr)
 library(huxtable) #quick_docx
 library(pbkrtest) #PBmodcomp
-library(dplyr) #na_if
-library(tibble) #remove_rownames
 library(kableExtra) #knitr::kable
 library(broom.mixed) #tidy
-library(dotwhisker) #dwplot
 
 
 #################### READ DATA ####################
@@ -91,13 +89,13 @@ ggplot(data_long2, aes(x=Perc.Weight)) +
 
 # scatterplot of overall data trends
 ggplot(data_long2, aes(x=Time, y=Perc.Weight, color=Donor)) +
-  geom_point() + theme_bw(base_size=13) + 
+  geom_point() + theme_pubr(legend="right", border=T) + 
   labs(x="Time", y="Perc.Weight")
 
 # trendlines per donor
 ggplot(data_long2, aes(x=Time, y=Perc.Weight, colour=Donor.Status)) +
   geom_line(aes(group=Mouse), lwd=1) + facet_wrap(~Donor) + 
-  theme_bw(base_size=13)
+  theme_pubr(border=T)
 
 # boxplots based on mouse
 ggplot(data_long2, aes(x=Mouse, y=Perc.Weight, color=Donor)) +
@@ -121,7 +119,7 @@ avg_donors = data_long2 %>% group_by(Donor, Time) %>%
 
 ggplot() +
   geom_line(avg_donors, mapping=aes(x=Time, y=Perc.Weight, color=Donor, linetype=Donor.Status), lwd=0.75) +
-  theme_bw(base_size=13) 
+  theme_pubr(legend="right", border=T) 
 
 
 ##################### FIT MODELS ####################
@@ -134,23 +132,22 @@ complete = lmerTest::lmer(Perc.Weight ~ Donor.Status*Time + (Time|Donor) +
 summary(allFit(complete))
 
 # the following optimizers produced convergence warnings:
-# bobyqa: boundary (singular) fit: see ?isSingular
-# Nelder_Mead: unable to evaluate scaled gradient
-#              Model failed to converge: degenerate  Hessian with 1 negative eigenvalues
-# optimx.L-BFGS-B: boundary (singular) fit: see ?isSingular
+#     bobyqa: boundary (singular) fit: see ?isSingular
+#     Nelder_Mead: unable to evaluate scaled gradient
+#                  Model failed to converge: degenerate  Hessian with 1 negative eigenvalues
+#     optimx.L-BFGS-B: boundary (singular) fit: see ?isSingular
+# - nlminbwrap, nmkbw, nloptwrap.NLOPT_LN_NELDERMEAD, and nloptwrap.NLOPT_LN_BOBYQA 
+#   did not produce convergence warnings
 
-# nlminbwrap, nmkbw, nloptwrap.NLOPT_LN_NELDERMEAD, and nloptwrap.NLOPT_LN_BOBYQA 
-# did not produce convergence warnings
-
-# try making random effect term uncorrelated
+# try making random the effect terms uncorrelated
 complete2 = lmerTest::lmer(Perc.Weight ~ Donor.Status*Time + (Time||Donor) + 
                             (Time||Donor:Mouse), data_long2)
 
 # check the convergence warnings again
 summary(allFit(complete2))
 
-# only nloptwrap.NLOPT_LN_BOBYQA (the default) produced a warning
-# Model failed to converge with max|grad| = 0.00708574 (tol = 0.002, component 1)
+# only nloptwrap.NLOPT_LN_BOBYQA (the default) produced a warning:
+#     Model failed to converge with max|grad| = 0.00708574 (tol = 0.002, component 1)
 
 # fit nested mixed effects models
 lmod2 = update(complete, .~. - (Time|Donor) + (1|Donor)) #mouse slope/intercept + donor intercept
@@ -161,79 +158,49 @@ lmod6 = update(lmod5, .~. - (1|Donor:Mouse)) #donor intercept
 lmod7 = update(lmod5, .~. - (1|Donor)) #mouse intercept
 lmod8 = update(lmod3, .~. - (1|Donor:Mouse)) #donor slope/intercept
 
-# lmod3 produced the following warning: In checkConv(attr(opt, "derivs"), opt$par, ctrl = control$checkConv,  :
-#                                       Model failed to converge with max|grad| = 0.00295291 (tol = 0.002, component 1)
+# lmod3 produced the following warning: 
+#     In checkConv(attr(opt, "derivs"), opt$par, ctrl = control$checkConv,  :
+#     Model failed to converge with max|grad| = 0.00295291 (tol = 0.002, component 1)
 # - nmkbw and optimx.L-BFGS-B were the only optimizers that did not produce warnings for lmod3
 
-# lmod8 produced the following warning: boundary (singular) fit: see ?isSingular
-# - optimx.L-BFGS-B
+# lmod8 produced the following warning: 
+#     optimx.L-BFGS-B: boundary (singular) fit: see ?isSingular
 
 # fit null model (no random effects)
 null = lm(Perc.Weight ~ Donor.Status*Time, data_long2)
 
-# fit reduced models (without the interaction effect)
-complete.red = update(complete, .~. - Donor.Status:Time)
-lmod2.red = update(lmod2, .~. - Donor.Status:Time)
-lmod4.red = update(lmod4, .~. - Donor.Status:Time)
-lmod7.red = update(lmod7, .~. - Donor.Status:Time)
-null.red = update(null, .~. - Donor.Status:Time)
+# fit repeated measures anova
+rm = aov(formula = Perc.Weight ~ Donor.Status*Time + Error(Mouse), data_long2)
+
+# fit autocorrelation models
+ac = gls(Perc.Weight ~ Donor.Status*Time, data=data_long2,
+         correlation=corCAR1(form=~Time|Donor/Mouse)) # logLik = -1176.984
+ac2 = update(ac, correlation=corCAR1(form=~1|Donor/Mouse)) # logLik = -1226.052
+
+# fit models suggested by the reviewer
+re.ac = lme(Perc.Weight~Donor.Status*Time, data=data_long2,
+            random=~Time|Mouse, correlation=corCAR1(form=~Time|Mouse),
+            control=lmeControl(opt="optim")) # logLik = -1172.513
+re.ac2 = update(re.ac, random=~1|Mouse, correlation=corCAR1(form=~1|Mouse)) # logLik = -1175.597
 
 # save models for power analysis
 #save(lmod4, file="mouse_slope_int.R")
 #save(lmod7, file="mouse_intercept.R")
 #save(null, file="no_RE.R")
 
-# refit the models with the first few time points removed
+# refit the models with the first few time points removed (no convergence warnings)
 complete.nodip = update(complete, data=data_long_nodip)
 lmod2.nodip = update(lmod2, data=data_long_nodip)
 lmod4.nodip = update(lmod4, data=data_long_nodip)
-lmod7.nodip = update(lmod7, data=data_long_nodip)
-null.nodip = update(null, data=data_long_nodip)
-
-# no convergence warnings for the complete model anymore, but the
-# following warning was produced for lmod2 & lmod4: Model failed to 
-# converge with max|grad| = 0.00521901 (tol = 0.002, component 1)
-# - nmkbw (just lmod2) and optimx.L-BFGS-B (both)
+lmod7.nodip = update(lmod7, data=data_long_nodip) # interaction term much less significant, sign for group effect changed
+null.nodip = update(null, data=data_long_nodip) # interaction term much less significant
 
 
-#################### DIAGNOSTIC PLOTS ####################
-
-# time vs residuals (null model) faceted by donor to determine need for random interecept (mouse)
-ggplot(data_long2, aes(x=Time, y=residuals(null), group=Mouse)) +
-  geom_line() + facet_wrap(~Donor) +
-  labs(x="Days", y="Residuals", title="No Random Effects") + theme_bw()
-# variance increases over time suggesting need for random effects
-
-# time vs residuals (mouse intercept model) faceted by donor to determine need for random slope (mouse)
-ggplot(data_long2, aes(x=Time, y=residuals(lmod7), group=Mouse)) +
-  geom_line() + facet_wrap(~Donor) +
-  scale_y_continuous(limits=c(-20,20)) + theme_bw() +
-  labs(x="Days", y="Residuals", title="Mouse Intercept") 
-# variance still not constant across time - add random slope
-
-# time vs residuals (mouse int/slope model) faceted by donor to determine need for random intercept (donor)
-ggplot(data_long2, aes(x=Time, y=residuals(lmod4), group=Mouse)) +
-  geom_line() + facet_wrap(~Donor) +
-  scale_y_continuous(limits=c(-20,20)) + theme_bw() +
-  labs(x="Days", y="Residuals", title="Mouse Intercept/Slope")
-
-# time vs residuals (donor int + mouse int/slope model) faceted by donor to determine need for random slope (donor)
-ggplot(data_long2, aes(x=Time, y=residuals(lmod2), group=Mouse)) +
-  geom_line() + facet_wrap(~Donor) +
-  scale_y_continuous(limits=c(-20,20)) + theme_bw() +
-  labs(x="Days", y="Residuals", title="Donor Intercept + Mouse Int/Slope")
-
-# time vs residuals (donor int/slope + mouse int/slope model) faceted by donor
-ggplot(data_long2, aes(x=Time, y=residuals(complete), group=Mouse)) +
-  geom_line() + facet_wrap(~Donor) +
-  scale_y_continuous(limits=c(-20,20)) + theme_bw() +
-  labs(x="Days", y="Residuals", title="Donor Int/Slope + Mouse Int/Slope")
-
-# combine the residual plots
+#################### RESIDUAL PLOTS ####################
 
 # define model names
-names = c("Donor Int/Slope + Mouse Int/Slope",
-          "Donor Intercept + Mouse Int/Slope",
+names = c("Donor Intercept/Slope + Mouse Intercept/Slope",
+          "Donor Intercept + Mouse Intercept/Slope",
           "Mouse Intercept/Slope", "Mouse Intercept", "No Random Effects")
 
 # create list of models
@@ -255,61 +222,35 @@ resid_data$Model = factor(resid_data$Model, levels=rev(names))
 # plot time vs residuals faceted by model
 ggplot(resid_data, aes(x=Time, y=Residuals)) +
   geom_line(aes(group=RE)) + facet_wrap(~Model, ncol=2) + 
-  theme_bw(base_size=13)
+  theme_pubr(border=T)
+# No Random Effects - variance increases over time suggesting need for random effects
+# Mouse Intercept - variance still not constant across time - add random slope
 
-# create data frame of the model coefficient estimates and standard errors
-terms = c("(Intercept)", "Group", "Time", "Interaction")
-model.nums = c("I", "II", "III", "IV", "V")
-model.data = rbind(summary(complete)$coefficients[,1:2],
-                   summary(lmod2)$coefficients[,1:2],
-                   summary(lmod4)$coefficients[,1:2],
-                   summary(lmod7)$coefficients[,1:2],
-                   summary(null)$coefficients[,1:2])
 
-# add the names of the terms and models
-model.data = as.data.frame(model.data) %>% remove_rownames() %>%
-  mutate(term=rep(terms, times=5), model=rep(model.nums, each=4)) %>% 
-  rename(estimate=Estimate, std.error=`Std. Error`) %>% arrange(desc(model))
-model.data$model = factor(model.data$model, levels=model.nums, labels=model.nums)
+#################### COEFFICIENT PLOT ####################
 
-# function to recreate the ggplot2 color palette 
-# https://stackoverflow.com/questions/8197559/emulate-ggplot2-default-color-palette
-gg_color_hue <- function(n) {
-  hues = seq(15, 375, length = n + 1)
-  hcl(h = hues, l = 65, c = 100)[1:n]
-}
+# create data frame of the model coefficient estimates, standard errors, and confidence intervals
+# (coef_data function in Functions.R script)
+terms = c("Group", "Time", "Interaction")
+model.data = coef_data(models, names) %>% arrange(desc(Model))
 
-# coefficient plot
-dwplot(model.data, dot_args=c(size=1.5), whisker_args=c(size=1)) %>% 
-  relabel_predictors(c("Donor.StatusUndernourished"="Group", "Time"="Time",
-                       "Donor.StatusUndernourished:Time"="Interaction")) +
+# reorder the factor variables
+model.data$Term = reorder(model.data$Term, model.data$Estimate)
+model.data$Model = reorder(model.data$Model, desc(model.data$Model))
+
+# dot and whisker plot of the coefficient estimates and 95% confidence intervals
+ggplot(model.data) + geom_point(aes(x=Estimate, y=Term, color=Model), position=position_dodge(width = 1/2)) +
+  geom_linerange(aes(y=Term, xmin=ci.low, xmax=ci.high, color=Model), position=position_dodge(width = 1/2), show.legend=F, lwd=1) +
   geom_vline(xintercept = 0, colour = "grey60", linetype = 2) +
-  scale_color_manual(name="Model", values=gg_color_hue(5), breaks=model.nums) +
-  theme_bw(base_size=13) #+ labs(title="Full Data") + xlim(c(-2, 2))
-
-model.data.nodip = rbind(summary(complete.nodip)$coefficients[,1:2],
-                   summary(lmod2.nodip)$coefficients[,1:2],
-                   summary(lmod4.nodip)$coefficients[,1:2],
-                   summary(lmod7.nodip)$coefficients[,1:2],
-                   summary(null.nodip)$coefficients[,1:2])
-
-model.data.nodip = as.data.frame(model.data.nodip) %>% remove_rownames() %>%
-  mutate(term=rep(terms, times=5), model=rep(model.nums, each=4)) %>% 
-  rename(estimate=Estimate, std.error=`Std. Error`) %>% arrange(desc(model))
-model.data.nodip$model = factor(model.data.nodip$model, levels=model.nums, labels=model.nums)
-
-dwplot(model.data.nodip, dot_args=c(size=1.5), whisker_args=c(size=1)) %>% 
-  relabel_predictors(c("Donor.StatusUndernourished"="Group", "Time"="Time",
-                       "Donor.StatusUndernourished:Time"="Interaction")) +
-  geom_vline(xintercept = 0, colour = "grey60", linetype = 2) +
-  scale_color_manual(name="Model", values=gg_color_hue(5), breaks=model.nums) +
-  theme_bw(base_size=13) + labs(title="Reduced Data (no dip)") + xlim(c(-2, 2))
+  scale_color_manual(name="Model", values=gg_color_hue(5), breaks=names) + 
+  labs(x="Estimate", y=element_blank()) +
+  theme_pubr(border=T, legend="right")
 
 
 #################### TEST MODELS ####################
 
 # likelihood ratio tests (lrt) of the random effects
-# (use refit=FALSE for restricted liklihood ratio test)
+# (use refit=FALSE for restricted likelihood ratio test)
 # extract chi-squared test statistic (column 6) & p-value (column 8)
 lrt1v2 = anova(complete, lmod2)[2,c(6,8)] #donor slope
 lrt1v3 = anova(complete, lmod3)[2,c(6,8)] #mouse slope
@@ -330,13 +271,6 @@ lrt7vnull = anova(lmod7, null)[2,c(6,8)] #mouse intercept
 #pb4v7 = pbkrtest::PBmodcomp(lmod4, lmod7, seed=1)
 #pb7v8 = pbkrtest::PBmodcomp(lmod7, null, seed=1) #doesn't work with lm model
 
-# likelihood ratio tests (lrt) of the interaction effect - needs to be refit with ML
-lrt.complete = anova(complete, complete.red)[2,c(6,8)]
-lrt.lmod2 = anova(lmod2, lmod2.red)[2,c(6,8)]
-lrt.lmod4 = anova(lmod4, lmod4.red)[2,c(6,8)]
-lrt.lmod7 = anova(lmod7, lmod7.red)[2,c(6,8)]
-lrt.null = anova(null, null.red)[2,c(6,8)]
-
 
 #################### RESULTS ####################
 
@@ -345,18 +279,16 @@ pvalues = as.numeric(c(lrt1v2[,2], lrt2v4[,2], lrt4v7[,2], lrt7vnull[,2], ""))
 pvalues = formatC(pvalues, format="e", digits=2)
 pvalues[length(pvalues)] = ""
 
-# make a model comparison table for the five models in paper (results_table function in Functions.R script)
+# make a model comparison table for the five models in paper 
+# (results_table function in Functions.R script)
 results = results_table(models, pvalues, names)
 
+# bold the estimates with a p-value < 0.05
 results2 = results[[1]] %>% knitr::kable(format="html", format.args=list(big.mark = ','), escape=F) %>%
   column_spec(2, bold=ifelse(results[[2]][,2]>0.05, FALSE, TRUE)) %>% 
   column_spec(3, bold=ifelse(results[[2]][,3]>0.05, FALSE, TRUE)) %>%
   column_spec(4, bold=ifelse(results[[2]][,4]>0.05, FALSE, TRUE))
 #quick_docx(results2)
-
-# make a model comparison table for the five models after removing the dip
-models.nodip = list(complete.nodip, lmod2.nodip, lmod4.nodip, lmod7.nodip, null.nodip)
-results.nodip = results_table(models.nodip, pvalues=NA, names)
 
 # make a test results table for the five models in paper
 tests = rbind(lrt1v2, lrt2v4, lrt4v7, lrt7vnull)
