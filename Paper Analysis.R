@@ -172,16 +172,16 @@ null = lm(Perc.Weight ~ Donor.Status*Time, data_long2)
 # fit repeated measures anova
 rm = aov(formula = Perc.Weight ~ Donor.Status*Time + Error(Mouse), data_long2)
 
-# fit autocorrelation models
-ac = gls(Perc.Weight ~ Donor.Status*Time, data=data_long2,
-         correlation=corCAR1(form=~Time|Donor/Mouse)) # logLik = -1176.984
-ac2 = update(ac, correlation=corCAR1(form=~1|Donor/Mouse)) # logLik = -1226.052
+# fit autocorrelation model
+ac = gls(Perc.Weight ~ Donor.Status*Time, data=data_long2, 
+         correlation=corCAR1(form=~1|Mouse)) # logLik = -1175.597
 
-# fit models suggested by the reviewer
-re.ac = lme(Perc.Weight~Donor.Status*Time, data=data_long2,
-            random=~Time|Mouse, correlation=corCAR1(form=~Time|Mouse),
-            control=lmeControl(opt="optim")) # logLik = -1172.513
-re.ac2 = update(re.ac, random=~1|Mouse, correlation=corCAR1(form=~1|Mouse)) # logLik = -1175.597
+# fit autocorrelation model with a random slope for mouse
+re.ac = lme(Perc.Weight~Donor.Status*Time, data=data_long2, random=~0+Time|Mouse, 
+             correlation=corCAR1(form=~1|Mouse)) # logLik = -1133.994
+
+# add age as a covariate
+re.ac2 = update(re.ac, .~. + Donor.Age) # logLik = -1130.725
 
 # save models for power analysis
 #save(lmod4, file="mouse_slope_int.R")
