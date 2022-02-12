@@ -95,7 +95,8 @@ ggplot(data_long2, aes(x=Time, y=Perc.Weight, color=Donor)) +
 # trendlines per donor
 ggplot(data_long2, aes(x=Time, y=Perc.Weight, colour=Donor.Status)) +
   geom_line(aes(group=Mouse), lwd=1) + facet_wrap(~Donor) + 
-  theme_pubr(border=T)
+  labs(x="Time (days)", y="% Initial Weight", colour="Donor Status", title="Mouse Trendlines per Donor") +
+  theme_pubr(border=T, legend="right", base_size=13)
 
 # boxplots based on mouse
 ggplot(data_long2, aes(x=Mouse, y=Perc.Weight, color=Donor)) +
@@ -119,7 +120,8 @@ avg_donors = data_long2 %>% group_by(Donor, Time) %>%
 
 ggplot() +
   geom_line(avg_donors, mapping=aes(x=Time, y=Perc.Weight, color=Donor, linetype=Donor.Status), lwd=0.75) +
-  theme_pubr(legend="right", border=T) 
+  labs(x="Time (days)", y="% Initial Weight", linetype="Donor Status", title="Average Donor Trendlines") +
+  theme_pubr(legend="right", border=T, base_size=13) 
 
 
 ##################### FIT MODELS ####################
@@ -174,14 +176,29 @@ rm = aov(formula = Perc.Weight ~ Donor.Status*Time + Error(Mouse), data_long2)
 
 # fit autocorrelation model
 ac = gls(Perc.Weight ~ Donor.Status*Time, data=data_long2, 
-         correlation=corCAR1(form=~1|Mouse)) # logLik = -1175.597
+         correlation=corCAR1(form=~1|Mouse)) # logLik = -1175.6
 
-# fit autocorrelation model with a random slope for mouse
-re.ac = lme(Perc.Weight~Donor.Status*Time, data=data_long2, random=~0+Time|Mouse, 
-             correlation=corCAR1(form=~1|Mouse)) # logLik = -1133.994
+# fit autocorrelation model with a random intercept for mouse
+re.ac = lme(Perc.Weight~Donor.Status*Time, data=data_long2, random=~1|Mouse, 
+            correlation=corCAR1(form=~1|Mouse)) # logLik = -1175.6
 
-# add age as a covariate
-re.ac2 = update(re.ac, .~. + Donor.Age) # logLik = -1130.725
+# add a random slope for mouse to the re.ac model
+re.ac2 = lme(Perc.Weight~Donor.Status*Time, data=data_long2, random=~Time|Mouse, 
+             correlation=corCAR1(form=~1|Mouse),
+             control=lmeControl(opt='optim', optimMethod='SANN')) # logLik = -1134.1
+
+# re.ac2 produced the following error if the control option is not specified:
+#    nlminb problem, convergence error code = 1
+#    message = iteration limit reached without convergence (10)
+
+# remove the random intercept from the re.ac model
+re.ac3 = lme(Perc.Weight~Donor.Status*Time, data=data_long2, random=~0+Time|Mouse, 
+            correlation=corCAR1(form=~1|Mouse)) # logLik = -1134.1
+
+# refit the autocorrelation models using maximum likelihood
+ac.ml = update(ac, method="ML")
+re.ac.ml = update(re.ac, method="ML")
+re.ac3.ml = update(re.ac3, method="ML")
 
 # save models for power analysis
 #save(lmod4, file="mouse_slope_int.R")
@@ -249,7 +266,7 @@ ggplot(model.data) + geom_point(aes(x=Estimate, y=Term, color=Model), position=p
 
 #################### TEST MODELS ####################
 
-# likelihood ratio tests (lrt) of the random effects
+# likelihood ratio tests (lrt) of the random effects for the nested models
 # (use refit=FALSE for restricted likelihood ratio test)
 # extract chi-squared test statistic (column 6) & p-value (column 8)
 lrt1v2 = anova(complete, lmod2)[2,c(6,8)] #donor slope
@@ -264,6 +281,11 @@ lrt5v7 = anova(lmod5, lmod7)[2,c(6,8)] #donor intercept
 lrt8v6 = anova(lmod8, lmod6)[2,c(6,8)] #donor slope
 lrt6vnull = anova(lmod6, null)[2,c(6,8)] #donor intercept
 lrt7vnull = anova(lmod7, null)[2,c(6,8)] #mouse intercept
+
+# likelihood ratio tests (lrt) of the random effects / correlation structure for the autocorrelation models
+lrtACvnull = anova(ac.ml, null)[2,c(8,9)] #autocorrelation
+lrtRE.ACvAC = anova(re.ac.ml, ac.ml)[2,c(8,9)] #mouse intercept
+lrtRE.AC3vAC = anova(re.ac3.ml, ac.ml)[2,c(8,9)] #mouse slope
 
 # parametric bootstrap tests of the random effects (these take a little while to run)
 #pb1v2 = pbkrtest::PBmodcomp(complete, lmod2, seed=1)
