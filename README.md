@@ -1,6 +1,6 @@
 # Longitudinal Mouse Analysis
 
-This repository contains the data and code for the manuscript titled "Accessible Analysis of Longitudinal Data Using Linear Mixed Effects Models."
+This repository contains the data and code for the manuscript titled [Accessible Analysis of Longitudinal Data Using Linear Mixed Effects Models](https://journals.biologists.com/dmm/article/15/5/dmm048025/275308/Accessible-analysis-of-longitudinal-data-with).
 
 | **Filename**			| **Description** |
 |:------------------------------|:----------------|
